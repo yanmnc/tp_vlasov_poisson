@@ -1,0 +1,6 @@
+*.mod
+*.exe
+*.o
+core
+__pycache__
+build
