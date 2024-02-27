@@ -76,7 +76,7 @@ To use one of the above scripts:
 module avail # (to see which modules are available for download)
 module load matlab/XX # e.g. matlab/2013b
 matlab #(to launch Matlab)
-addpath('post_process/wk/MatlabScripts/')
+addpath('post_process/MatlabScripts/')
 read_VlasovPoiss()           
 PostProcess_Landau (or PostProcess_BoumpOnTail)
 ```

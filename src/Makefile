@@ -15,31 +15,37 @@
 #**************************************************************
 
 F90 = gfortran
+BINDIR = ../build
+EXEC = $(BINDIR)/VlasovPoisson.exe
 
-BINDIR  = .
-EXEC    = $(BINDIR)/VlasovPoisson.exe
+SRCDIR = .
+OBJDIR = ../build
 
-OBJS = prec_const.o globals.o read_data.o \
-	utils.o geometry.o fft_NRF90.o LUsolving_tridiag.o \
+OBJS = $(addprefix $(OBJDIR)/, prec_const.o globals.o read_data.o \
+        utils.o geometry.o fft_NRF90.o LUsolving_tridiag.o \
         spline1d.o spline1d_natural_types.o spline1d_natural.o \
-	spline1d_periodic_types.o spline1d_periodic.o interpolation.o \
-	fdistribu2d.o efield.o advec1D_SL.o energy.o ascii_saving.o physics.o \
-	RHS_operators.o resol_steps.o  VlasovPoisson.o
+        spline1d_periodic_types.o spline1d_periodic.o interpolation.o \
+        fdistribu2d.o efield.o advec1D_SL.o energy.o ascii_saving.o physics.o \
+	RHS_operators.o resol_steps.o VlasovPoisson.o)
 
-SOURCES =  $(OBJS:.o=.f90) $(OBJS:.o=.F90) 
+SOURCES = $(OBJS:.o=.f90) $(OBJS:.o=.F90)
 
 .SUFFIXES: .f90 .F90 .o
 
-debug:$(EXEC)
+debug: $(EXEC)
 
-$(EXEC): $(OBJS)
-	$(F90) $(OBJS) $(LIBS) -o $@ 
+$(EXEC): $(OBJS) | $(BINDIR)
+	$(F90) $(OBJS) $(LIBS) -o $@
 
-%.o: %.f90
-		$(F90) -c $(F90FLAGS) $< -o $@
+$(BINDIR):
+	mkdir -p $(BINDIR)
 
-%.o: %.F90
-		$(F90) -c $(F90FLAGS) $< -o $@
+$(OBJDIR)/%.o: $(SRCDIR)/%.f90 | $(BINDIR)
+	$(F90) -J$(OBJDIR) -c $(F90FLAGS) $< -o $@
 
-clean:	
-	rm -f $(OBJS) *.o *~ *.mod  core *.exe
+$(OBJDIR)/%.o: $(SRCDIR)/%.F90 | $(BINDIR)
+	$(F90) -J$(OBJDIR) -c $(F90FLAGS) $< -o $@
+
+clean:
+	@rm -f $(OBJDIR)/*
+	@rmdir $(OBJDIR)
