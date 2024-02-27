@@ -4,4 +4,5 @@
 core
 __pycache__
 build
+.build
 wk/DRUN*
