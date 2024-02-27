@@ -1,0 +1,85 @@
+set -vx
+#*************************************************************************
+#  AUTOMATIC CREATION OF THE RESULT DIRECTORY
+#*************************************************************************
+CASENAME=`basename $0 | tr '[:lower:]' '[:upper:]'`
+CASE=D${CASENAME}
+DIR_CODE=$(dirname $PWD)
+DIR_SRC=${DIR_CODE}/src
+DIR_WK=${DIR_CODE}/wk
+
+# create the work directory if it does not exist
+WKDIR=${DIR_WK}/${CASE}
+echo $DIR_WK
+
+if [ ! -d ${WKDIR} ]
+then
+  mkdir -p ${WKDIR}
+fi
+cd $WKDIR
+PWD= `pwd`
+echo $PWD
+#*************************************************************************
+#  INPUT DATA DESCRIPTION
+*************************************************************************
+cat << EOF > DATA
+&MESH 
+  Nx      = 256                    !-> (Nx+1) = number of points in x direction
+                                   !->   Rq: Nx must be a power of 2
+  Nv      = 127                    !-> (Nv+1) = number of points in v direction 
+                                   !->   Rq: (Nv+1) must be a power of 2
+  Lx      = 50				       !-> Length in x direction
+  x0      = 0.                     !-> x0 < x < x0+Lx
+  nb_vthi = 8.                     !-> -nb_vthi < v < nb_vthi
+/
+
+!------------------------------------------------------------------------
+!  Definition of the equilibrium fM and the initial perturbation   
+!    1) The equilibrium distribution function fM is defined as: 
+!         fM(v) = f1(v) + f2(v)                                 
+!        with                                                         
+!         f1(v) = (1-epsilon)/sqrt(2*PI)*exp(-v**2/2)                         
+!         if symmetric=false:
+!         f2(v) = epsilon/sqrt(2*PI*T0)*exp(-(v-v0)**2/(2*T0))               
+!         if symmetric=true:
+!         f2(v) = epsilon/sqrt(8*PI*T0)*[ exp(-(v-v0)**2/(2*T0))
+!		                	+ exp(-(v+v0)**2/(2*T0)) ]
+!                                                                    
+!    2) The perturbation is defined as:                              
+!        f(x,v) = fM(v) [ 1 + perturb*kx*kx*cos(kx*x) ]                        
+!------------------------------------------------------------------------
+&EQUIL                             
+  v0      = 3.8			   !-> v0 in f2(v) definition
+  T0      = 0.2                    !-> T0 in f2(v) definition
+  symmetric = .false.		   !-> 
+  epsilon = 0.1		   	   !-> epsilon in f1(v) and f2(v) definition
+  perturb = 1.e-5	           !-> perturbation magnitude
+  perturb_choice = 1               !-> 1: single mode (Landau)
+                                   !-> 2: bath of modes: 1<m<mode (Bump on Tail)
+  mode    = 3			   !-> mode number of initial perturbation, 
+	                           !->   (kx = 2*pi*mode/Lx)
+/
+!-----------------------------------------------------------------
+! RHS OPERATORS
+!  - Krook operator definition, for: df/dt = nu_coeff*(f-fM)
+!  - Diffusion operator in configuration space (x)
+!-----------------------------------------------------------------
+&RHS
+  nu_coeff   = 0.                  !-> Krook coefficient
+/
+&ALGORITHM
+  deltat      = 0.1		   !-> Time step
+  nbiter      = 600		   !-> Number of iterations
+/ 
+&OUTPUT
+  nbstep        = 4                !-> Diagnostic saving step
+  vdiag_forf1Dx = 1.               !-> v position choice for 
+                                   !->   f(x,v=vdiag_forf1Dx) saving
+  f2D_saving    = .true.           !-> = .true. if the evolution of the 
+                                   !->   distribution function is saved in 2D
+/
+EOF
+#*************************************************************************
+#  JOB SUBMISSION
+#*************************************************************************
+${DIR_SRC}/VlasovPoisson.exe < DATA > VlasovPoiss_res.out

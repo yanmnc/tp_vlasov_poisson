@@ -1,0 +1,146 @@
+!**************************************************************
+!  Copyright Euratom-CEA
+!  Authors : 
+!     Virginie Grandgirard (virginie.grandgirard@cea.fr)
+!
+!  Code VlasovPoisson : solving of the 2D Vlasov-Poisson
+!    system for:
+!      1) Landau damping study or
+!      2) Plasma beam study
+!  
+!  This software is governed by the CeCILL-B license 
+!  under French law and abiding by the rules of distribution 
+!  of free software.  You can  use, modify and redistribute 
+!  the software under the terms of the CeCILL-B license as 
+!  circulated by CEA, CNRS and INRIA at the following URL
+!  "http://www.cecill.info". 
+!**************************************************************
+
+!---------------------------------------------
+! file : geometry.f90
+! 
+!  geometry definition (x,v)
+!---------------------------------------------
+module geometry_class
+  use prec_const
+  implicit none
+  
+  !*** geometry type definition ***
+  type :: geometry
+    real(RKIND) :: x0, v0  ! origin coordinates
+    real(RKIND) :: dx, dv  ! grid step size
+    integer     :: Nx, Nv  ! number of grid points
+
+    ! coordinates of the points in x direction
+    real(RKIND), dimension(:), pointer :: xgrid
+    ! coordinates of the points in v direction
+    real(RKIND), dimension(:), pointer :: vgrid
+
+    ! coefficients for the integral in all directions 
+    !   with simpson method
+    real(RKIND), dimension(:), pointer :: coeff_intdx
+    real(RKIND), dimension(:), pointer :: coeff_intdv
+  end type geometry
+    
+  !******************************
+  contains
+  !******************************
+
+  !------------------------------------------
+  ! initialisation of the space coordinate x
+  !------------------------------------------
+  subroutine new_space_coord(gthis,x0,Lx,Nx)
+    use utils_module
+    type(geometry) , intent(out) :: gthis
+    real(RKIND)    , intent(in)  :: x0   ! radial origin
+    real(RKIND)    , intent(in)  :: Lx   ! grid lengths
+    integer        , intent(in)  :: Nx   ! node number
+    
+    integer :: i
+    
+    !*** variables initialisation ***
+    gthis%x0 = x0
+    gthis%dx = Lx/float(Nx)
+    gthis%Nx = Nx
+    
+    !*** coordinate array allocation ***
+    allocate(gthis%xgrid(0:Nx))
+            
+    !*** coordinate array initialisation ***    
+    do i = 0,Nx
+      gthis%xgrid(i) = gthis%x0+i*gthis%dx
+    enddo
+
+    !*** initialization of the integral coefficient ***
+    !*** for \int . dx computation                  ***
+    allocate(gthis%coeff_intdx(0:Nx))
+    call compute_simpson_coeff(gthis%Nx,gthis%dx, &
+      .false.,gthis%coeff_intdx)
+  end subroutine new_space_coord
+  
+
+  !-------------------------------------------------------
+  ! initialisation of the velocity coordinate (vparallel)
+  !-------------------------------------------------------     
+  subroutine new_velocity_coord(gthis,nb_vthi,Nv)
+    use utils_module
+    type(geometry), intent(inout) :: gthis
+    real(RKIND)   , intent(in)    :: nb_vthi ! number of vthi
+    integer       , intent(in)    :: Nv   ! division number in v
+                                             ! direction
+    
+    real(RKIND) :: Lv, v0, vth0
+    integer     :: l
+        
+    !*** boundary and length interval initialisation ***
+    vth0 = 1._RKIND
+    Lv   = 2_RKIND*nb_vthi*vth0
+    v0   = -nb_vthi*vth0
+    
+    gthis%Nv = Nv
+    gthis%dv = Lv/float(Nv)
+    
+    !*** coordinate array allocation ***
+    allocate(gthis%vgrid(0:Nv))
+         
+    !*** coordinate array initialisation ***  
+    do l=0,Nv
+      gthis%vgrid(l) = v0+l*gthis%dv
+    enddo                
+
+    !*** initialization of the integral coefficient ***
+    !*** for \int . dv computation                  ***
+    allocate(gthis%coeff_intdv(0:Nv))
+    call compute_simpson_coeff(gthis%Nv,gthis%dv, &
+      .false.,gthis%coeff_intdv)
+  end subroutine new_velocity_coord 
+
+
+  !----------------------------------------------------- 
+  ! geometry destructor
+  !-----------------------------------------------------   
+  subroutine del_geometry(gthis)
+    type(geometry), intent(inout) :: gthis
+
+    deallocate(gthis%xgrid)
+    deallocate(gthis%coeff_intdx)
+    deallocate(gthis%vgrid)
+    deallocate(gthis%coeff_intdv)
+  end subroutine del_geometry
+
+  
+  !-------------------------------------------------------
+  ! verify if the point belongs to the boundary 
+  !  in x or v direction
+  !------------------------------------------------------- 
+  subroutine boundary(gthis,iv,bound)
+    type(geometry), intent(in)  :: gthis
+    integer       , intent(in)  :: iv
+    logical       , intent(out) :: bound 
+    
+    bound = .false.
+    if ((iv.eq.0).or.(iv.eq.gthis%Nv)) then
+      bound = .true.
+    endif 
+  end subroutine boundary    
+end module geometry_class

@@ -1,0 +1,161 @@
+!**************************************************************
+!  Copyright Euratom-CEA
+!  Authors : 
+!     Virginie Grandgirard (virginie.grandgirard@cea.fr)
+!
+!  Code VlasovPoisson : solving of the 2D Vlasov-Poisson
+!    system for:
+!      1) Landau damping study or
+!      2) Plasma beam study
+!  
+!  This software is governed by the CeCILL-B license 
+!  under French law and abiding by the rules of distribution 
+!  of free software.  You can  use, modify and redistribute 
+!  the software under the terms of the CeCILL-B license as 
+!  circulated by CEA, CNRS and INRIA at the following URL
+!  "http://www.cecill.info". 
+!**************************************************************
+
+!-------------------------------------------------------------------
+! file : VlasovPoisson.f90
+!
+! main program
+!           2D VLASOV POISSON CODE 
+!  - f(x,vpar) : 2D ionic distribution function
+!  - E(x)      : coordinates of the Electric field 
+!-------------------------------------------------------------------
+program VlasovPoisson
+  use globals
+  use geometry_class
+  use fdistribu2d_class
+  use efield_module
+  use resol_steps_module
+  use physics_module
+  use ascii_saving_module
+  use rhs_module
+  
+  implicit none
+
+  !*** variable definition ***
+  !-> geometry
+  type(geometry)    :: geom     
+  !-> distribution function
+  type(fdistribu2d) :: f1
+  type(fdistribu2d) :: f2
+  type(fdistribu2d) :: f_tmp
+  !-> electrostatic potential
+  real(RKIND), dimension(:), pointer :: Phi1
+  real(RKIND), dimension(:), pointer :: Phi2
+  !-> electric field
+  real(RKIND), dimension(:), pointer :: E1
+  real(RKIND), dimension(:), pointer :: E2
+
+  ! used for results output
+  real(RKIND) :: iter_time
+  integer     :: nbsave
+
+  !*** input file reading ***
+  print*,'*** READING OF THE DATA ***'
+  call read_input()
+
+  !*** input parameter saving ***
+  call write_parameters()
+  call ascii_param_write()
+
+  !*************************************************
+  ! INITIALISATION
+  !  - mesh initialisation,
+  !  - diffusion initialisation,
+  !  - Electric field allocation,
+  !  - distribution function initialisation and 
+  !  - first matlab saving (geometry, initial 
+  !     distribution function, ...)
+  !*************************************************
+  !*** mesh initialisation
+  call new_space_coord(geom,x0,Lx,Nx)
+  call new_velocity_coord(geom,nb_vthi,Nv)
+
+  !*** diffusion initialisation
+  call new_RHS
+  call init_diffusion(geom,0.5_RKIND*deltat)
+
+  !*** allocation for the results ***
+  nbsave = int((nbiter)/nbstep)-1+min(1,mod(nbiter,nbstep))
+  nbsave = nbsave+1
+  call results_allocate(geom,nbsave)
+
+  !*** electric field and distribution function allocation ***
+  call new_efield(Phi1,E1)
+  call new_fdistribu2d(f1,geom,v0,T0,symmetric,epsilon)
+  call new_fdistribu2d(f_tmp,geom,v0,T0,symmetric,epsilon)
+  if (time_scheme=='LF') then
+    call new_efield(Phi2,E2)
+    call new_fdistribu2d(f2,geom,v0,T0,symmetric,epsilon)
+  end if
+
+
+  !*************************************************
+  ! STEP 0
+  !*************************************************
+  init_time = 0._RKIND
+  iter_glob = 0
+  idiag     = 0
+  if (time_scheme=='LF') then
+    call step0_LF(geom,deltat,f1,Phi1,E1,f2,Phi2,E2)
+  else
+    call step0_PC(geom,deltat,f1,Phi1,E1)
+  end if
+  call write_info(iter_glob,init_time,deltat)
+  call diagnostics(init_time,0,geom,f1,Phi1,E1)
+
+
+  !*************************************************
+  ! GLOBAL RESOLUTION BEGINNING
+  !*************************************************
+  iter_time = init_time
+  iter_glob = 1
+  do while (iter_glob.le.nbiter)
+    iter_time = iter_time + deltat
+    call write_info(iter_glob,iter_time,deltat)
+    if (time_scheme=='LF') then     
+      call leap_frog_iteration(geom,iter_glob, &
+        deltat,f_tmp,f1,Phi1,E1,f2,Phi2,E2)
+    else
+      call predcorr_iteration(geom,iter_glob,deltat,f_tmp,f1,Phi1,E1)
+    end if
+    if ( (mod(iter_glob,nbstep).eq.0).or.(iter_glob.eq.nbiter) ) then
+      idiag = idiag + 1
+      call diagnostics(iter_time,idiag,geom,f1,Phi1,E1) 
+    endif
+    iter_glob = iter_glob + 1
+  end do
+
+
+  !*************************************************
+  ! GLOBAL RESOLUTION END
+  !************************************************* 
+  print*,' '
+  print*,'**********************'
+  print*,'*   SIMULATION END   *'
+  print*,'**********************'
+
+  !*** Saving in ascii format ***
+  call ascii_results_saving(geom,nbsave)
+
+  !*** results clearing ***
+  call results_clearing()
+
+  !*** results deallocation ***
+  call results_deallocate()
+
+  !*** deallocation ***
+  call del_geometry(geom)
+  call del_Efield(Phi1,E1)
+  call del_fdistribu2d(f1)
+  call del_fdistribu2d(f_tmp)
+  if (time_scheme=='LF') then
+    call del_Efield(Phi2,E2)
+    call del_fdistribu2d(f1)
+  end if
+  call del_RHS
+end program VlasovPoisson

@@ -1,0 +1,288 @@
+!**************************************************************
+!  Copyright Euratom-CEA
+!  Authors : 
+!     Virginie Grandgirard (virginie.grandgirard@cea.fr)
+!
+!  Code VlasovPoisson : solving of the 2D Vlasov-Poisson
+!    system for:
+!      1) Landau damping study or
+!      2) Plasma beam study
+!  
+!  This software is governed by the CeCILL-B license 
+!  under French law and abiding by the rules of distribution 
+!  of free software.  You can  use, modify and redistribute 
+!  the software under the terms of the CeCILL-B license as 
+!  circulated by CEA, CNRS and INRIA at the following URL
+!  "http://www.cecill.info". 
+!**************************************************************
+
+!-------------------------------------------------------
+! file : fdistribu2d.f90
+!
+! - the distribution function is defined by its cubic 
+! spline coefficients
+! - cubic spline interpolation for 
+! 2D function which is assumed :
+!  - periodic in the first direction (x),
+!  - no-periodic in the second direction (v). 
+!-------------------------------------------------------
+module fdistribu2d_class
+  use prec_const
+  use geometry_class
+
+  implicit none
+  public :: new, del
+  
+  !*** 2D spline type definition ***
+  type :: fdistribu2d    
+    integer     :: n1, n2
+    real(RKIND) :: h1, h2
+    
+    ! equilibrium values (Maxwellian function)
+    real(RKIND), dimension(:), pointer  :: Maxwellian
+    ! values of the function
+    real(RKIND), dimension(:,:), pointer  :: values
+  end type fdistribu2d
+  
+  !*** subroutine definition ***
+  interface new
+    module procedure new_fdistribu2d
+  end interface
+  
+  interface del
+    module procedure del_fdistribu2d
+  end interface
+    
+
+  !******************************
+  contains
+  !******************************       
+  
+  !--------------------------------- 
+  ! 2D function initialisation 
+  !---------------------------------
+  subroutine new_fdistribu2d(fthis,geom,fM_v0,fM_T0,fM_symmetric,fM_epsilon)
+    implicit none
+    type(fdistribu2d), intent(out) :: fthis
+    type(geometry)   , intent(in)  :: geom
+    real(RKIND)      , intent(in)  :: fM_v0, fM_T0
+    logical          , intent(in)  :: fM_symmetric
+    real(RKIND)      , intent(in)  :: fM_epsilon
+    
+    !*** dimension initialisation ***
+    fthis%n1 = geom%Nx
+    fthis%n2 = geom%Nv
+    fthis%h1 = geom%dx
+    fthis%h2 = geom%dv
+        
+    !*** initialisation of the Maxwellian ***
+    allocate(fthis%Maxwellian(0:fthis%n2))
+    fthis%Maxwellian = 0._RKIND
+    call compute_fMaxwellian(geom,fM_epsilon,fM_v0,fM_T0,fM_symmetric, &
+      fthis%Maxwellian)
+    
+    !*** array allocation for f values ***
+    allocate(fthis%values(0:fthis%n1,0:fthis%n2))
+  end subroutine new_fdistribu2d
+
+  
+  !--------------------------------- 
+  ! 2D spline destruction 
+  !---------------------------------
+  subroutine del_fdistribu2d(fthis)
+    type(fdistribu2d), intent(inout) :: fthis
+    
+    if (associated(fthis%values))     deallocate(fthis%values)
+    if (associated(fthis%Maxwellian)) deallocate(fthis%Maxwellian) 
+  end subroutine del_fdistribu2d
+     
+
+  !************************************************
+  ! AT THE FIRST STEP THE DISTRIBUTION FUNCTION 
+  !  IS GIVEN BY THE INITIAL CONDITIONS
+  !************************************************
+  !------------------------------------------------------------------------ 
+  ! Computation of the Maxwellian fM which is the equilibrium part 
+  !   of the distribution function : 
+  !    fM(v) = f1(v) + f2(v) 
+  !   with 
+  !    f1(v) = (1-epsilon)/(sqrt(2*PI))*exp(-v**2/2)  
+  !    if symmetric=false:
+  !    f2(v) = epsilon/sqrt(2*PI*T0)*exp(-(v-v0)**2/2*T0)
+  !    if symmetric=true:
+  !    f2(v) = epsilon/sqrt(2*PI*T0)*0.5*[exp(-(v-v0)**2/2*T0)
+  !                                      +exp(-(v+v0)**2/2*T0)]
+  !
+  ! Rk: In the Landau damping case : epsilon=0
+  !      such that fM(v) = 1/(sqrt(2*PI))*exp(-v**2/2)  
+  !------------------------------------------------------------------------
+  subroutine compute_fMaxwellian(geom,eps,v0_tail,T0_tail,ftail_symmetric,fM)
+    type(geometry)            , intent(in)  :: geom
+    real(RKIND)               , intent(in)  :: eps
+    real(RKIND)               , intent(in)  :: v0_tail, T0_tail
+    logical                   , intent(in)  :: ftail_symmetric
+    real(RKIND), dimension(0:), intent(out) :: fM
+    
+    integer     :: iv
+    real(RKIND) :: inv_sqrt_2pi, v_tmp, symmetric_tmp, norm_f2
+    real(RKIND) :: f1_v, f2_v
+    
+    inv_sqrt_2pi = 1._RKIND/sqrt(2._RKIND*PI)
+    norm_f2      = inv_sqrt_2pi/sqrt(T0_tail)
+
+    symmetric_tmp = 0._RKIND
+    if (ftail_symmetric) then 
+      symmetric_tmp = 1._RKIND
+      norm_f2       = norm_f2/2._RKIND
+    end if
+    
+    do iv = 0,geom%Nv
+      v_tmp  = geom%vgrid(iv) 
+      !--> bulk plasma particles
+      f1_v   = (1._RKIND-eps)*inv_sqrt_2pi * exp(-v_tmp*v_tmp/2._RKIND)
+      !--> beam
+      f2_v   = eps*norm_f2 * ( & 
+        exp(-(v_tmp-v0_tail)*(v_tmp-v0_tail)/(2._RKIND*T0_tail)) + &
+        symmetric_tmp * exp(-(v_tmp+v0_tail)*(v_tmp+v0_tail)/(2._RKIND*T0_tail)) )
+      !--> fM(v) = f1(v) + f2(v)
+      fM(iv) = f1_v + f2_v
+    enddo
+  end subroutine compute_fMaxwellian
+      
+
+  !--------------------------------------------------------
+  ! Distribution function initialisation :
+  !  ( at the specific point (x,v) )
+  !  f(x,v) = fM*(1+perturb*cos(kx*x))
+  !      with kx = 2*pi*mode/Lx
+  !   where fM is the following Maxwellian : 
+  ! The boundary conditions are  :
+  !    f(x=x0,v) = f(x=xn,v) = fM(v)
+  !--------------------------------------------------------
+  subroutine init_f(geom,fM,ix,iv,rand_phase,fvalue)
+    use globals, only : mode, Lx, Nx, Nv, perturb, perturb_choice
+    type(geometry)               , intent(in)  :: geom
+    real(RKIND)   , dimension(0:), intent(in)  :: fM
+    real(RKIND)   , dimension(:) , intent(in)  :: rand_phase
+    integer                      , intent(in)  :: ix, iv
+    real(RKIND)                  , intent(out) :: fvalue
+    
+    real(RKIND) :: f_perturb, xi, kx, phase
+    integer     :: m
+
+    !*** f initialisation ***
+    xi = geom%xgrid(ix) 
+    !*** Case of a single mode
+    if (perturb_choice.eq.1) then
+      kx        = float(mode)*TWOPI/Lx
+      f_perturb = perturb*kx*kx*cos(kx*xi)
+      fvalue    = fM(iv)*(1._RKIND+f_perturb)
+    end if
+    !*** Case of several modes
+    if (perturb_choice.eq.2) then
+      f_perturb = 0._RKIND
+      do m=1,mode
+        kx        = float(m)*TWOPI/Lx
+        !f_perturb = f_perturb + cos(kx*xi+rand_phase(m))
+        f_perturb = f_perturb + kx*kx*cos(kx*xi+rand_phase(m))
+      end do
+      fvalue = fM(iv)*(1._RKIND+perturb*f_perturb)
+    end if
+    if ( abs(fvalue).le.1.e-60_RKIND ) fvalue = 1.e-60_RKIND         
+  end subroutine init_f
+    
+
+  !------------------------------------------------------- 
+  ! Initialisation of the distribution function
+  !-------------------------------------------------------     
+  subroutine f_initialisation(fthis,geom)
+    use globals, only : mode, perturb_choice
+    type(fdistribu2d), intent(inout) :: fthis
+    type(geometry)   , intent(in)    :: geom
+
+    real(RKIND), dimension(:), pointer :: rand_phase
+    integer     :: i1, i2, m
+    real(RKIND) :: f_init
+
+    allocate(rand_phase(1:mode))
+
+    if (perturb_choice.eq.2) then
+      do m=1,mode
+        rand_phase(m) = rand(0)*TWOPI
+      end do
+    end if
+
+    do i2 = 1,fthis%n2-1
+      do i1 = 0,fthis%n1-1
+        call init_f(geom,fthis%Maxwellian,i1,i2,rand_phase,f_init)
+        fthis%values(i1,i2) = f_init
+      end do
+    end do
+    fthis%values(fthis%n1,0:fthis%n2) = fthis%values(0,0:fthis%n2)
+    fthis%values(0:fthis%n1,0)        = fthis%Maxwellian(0)
+    fthis%values(0:fthis%n1,fthis%n2) = fthis%Maxwellian(fthis%n2)
+    deallocate(rand_phase)
+  end subroutine f_initialisation
+
+
+  !************************************************
+  ! COMPUTE CUBIC SPLINES
+  !************************************************
+  !------------------------------------------------------- 
+  ! Compute the 1D cubic spline in x direction.
+  !  -> this direction is assumed periodic
+  !-------------------------------------------------------     
+  subroutine compute_spline_x(fthis,rhs,scoef1d)
+    use spline1d_periodic_types
+    use spline1d_periodic_class, only : spline1d_periodic_new, &
+        spline1d_periodic_spline_coef, spline1d_periodic_del
+
+    type(fdistribu2d)               , intent(in)    :: fthis
+    real(RKIND)      , dimension(0:), intent(in)    :: rhs
+    real(RKIND)      , &
+             dimension(-1:fthis%n1+1), intent(inout) :: scoef1d
+
+    type(spline1d_periodic_t) :: pspline1d
+
+    !*** resolution in x direction with ***
+    !***  periodic boundary conditions  ***
+    call spline1d_periodic_new(pspline1d,fthis%n1,fthis%h1)
+    call spline1d_periodic_spline_coef(pspline1d,rhs(0:fthis%n1))
+    scoef1d(-1:fthis%n1+1) = pspline1d%scoef(-1:fthis%n1+1)
+
+    !*** array deallocation ***
+    call spline1d_periodic_del(pspline1d)
+  end subroutine compute_spline_x
+
+
+  !------------------------------------------------------- 
+  ! Compute the 1D cubic spline in v direction.
+  !-------------------------------------------------------     
+  subroutine compute_spline_v(fthis,rhs,deriv_rhs,scoef1d)
+    use globals, only : BC_v_left, BC_v_right
+    use spline1d_natural_types
+    use spline1d_natural_class, only : spline1d_natural_new, &
+        spline1d_natural_spline_coef, spline1d_natural_del
+
+    type(fdistribu2d)                , intent(in)    :: fthis
+    real(RKIND)      , dimension(0:) , intent(in)    :: rhs
+    real(RKIND)      , dimension(0:1), intent(in)    :: deriv_rhs
+    real(RKIND)      , &
+              dimension(-1:fthis%n2+1), intent(inout) :: scoef1d
+
+    type(spline1d_natural_t) :: nspline1d
+
+    !*** resolution in v direction with ***
+    !***  natural boundary conditions   ***
+    call spline1d_natural_new(nspline1d,fthis%n2,fthis%h2)
+    call spline1d_natural_spline_coef(nspline1d,rhs(0:fthis%n2), &
+        BC_v_left,BC_v_right,deriv_rhs(0:1))
+    scoef1d(-1:fthis%n2+1) = nspline1d%scoef(-1:fthis%n2+1)
+
+    !*** array deallocation ***
+    call spline1d_natural_del(nspline1d)
+  end subroutine compute_spline_v
+
+end module fdistribu2d_class
+
+

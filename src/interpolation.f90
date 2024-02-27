@@ -1,0 +1,254 @@
+!**************************************************************
+!  Copyright Euratom-CEA
+!  Authors : 
+!     Virginie Grandgirard (virginie.grandgirard@cea.fr)
+!
+!  Code VlasovPoisson : solving of the 2D Vlasov-Poisson
+!    system for:
+!      1) Landau damping study or
+!      2) Plasma beam study
+!  
+!  This software is governed by the CeCILL-B license 
+!  under French law and abiding by the rules of distribution 
+!  of free software.  You can  use, modify and redistribute 
+!  the software under the terms of the CeCILL-B license as 
+!  circulated by CEA, CNRS and INRIA at the following URL
+!  "http://www.cecill.info". 
+!**************************************************************
+
+!-------------------------------------------------------
+! file : interpolation.f90 
+! 
+! - linear interpolation 
+! - interpolation in 2D by using spline coefficients 
+!-------------------------------------------------------
+module interpolation_module
+  use prec_const
+  use geometry_class
+  use utils_module, only : locate
+
+  implicit none
+  
+  !******************************
+  contains
+  !******************************
+
+  !--------------------------------------------- 
+  !  function interpolation by using the 
+  !  1D-spline coefficients calculated 
+  !  in x direction
+  !   - coef1d contains the 1D cubic splines 
+  !  in x direction
+  !---------------------------------------------
+  subroutine interpol1d_x(geom,coef1d,x1,xstar1,finterpol)
+
+    use spline1D_mod, only : spline1d_common_basis
+
+    type(geometry)                , intent(in)  :: geom
+    real(RKIND)   , dimension(-1:), intent(in)  :: coef1d
+    real(RKIND)   , dimension(0:) , intent(in)  :: x1
+    real(RKIND)                   , intent(in)  :: xstar1
+    real(RKIND)                   , intent(out) :: finterpol
+    
+    integer                      :: n1
+    integer                      :: ipos1
+    integer                      :: i
+    real(RKIND)                  :: h1
+    real(RKIND), dimension(-1:2) :: sbase1
+    character(LEN=50), parameter :: subp = " interpol1d_x "//char(0)
+
+    !*** local variable initialisation ***
+    n1 = geom%Nx
+    h1 = geom%dx
+    
+    !*** array position location ***
+    call locate(xstar1,x1,n1,h1,subp,ipos1)
+
+    !*** calculation of cubic spline basis ***
+    call spline1d_common_basis(x1(ipos1),xstar1,x1(ipos1+1),h1,sbase1)
+
+    !*** computation of f(x1*,l) ***
+    finterpol = 0._RKIND
+    do i = -1,2
+      finterpol = finterpol + coef1d(ipos1+i)*sbase1(i)
+      enddo
+  end subroutine interpol1d_x
+
+
+  !--------------------------------------------- 
+  !  function interpolation by using the 
+  !  1D-spline coefficients calculated 
+  !  in v direction
+  !   - coef1d contains the 1D cubic splines 
+  !  in v direction
+  !---------------------------------------------
+  subroutine interpol1d_v(geom,coef1d,x4,xstar4,finterpol)
+
+    use spline1D_mod, only : spline1d_common_basis
+
+    type(geometry)                , intent(in)  :: geom
+    real(RKIND)   , dimension(-1:), intent(in)  :: coef1d
+    real(RKIND)   , dimension(0:) , intent(in)  :: x4
+    real(RKIND)                   , intent(in)  :: xstar4
+    real(RKIND)                   , intent(out) :: finterpol
+    
+    integer                      :: n4
+    integer                      :: ipos4
+    integer                      :: l
+    real(RKIND)                  :: h4
+    real(RKIND), dimension(-1:2) :: sbase4
+    character(LEN=50), parameter :: subp = " interpol1d_v "//char(0)    
+
+    !*** local variable initialisation ***
+    n4 = geom%Nv
+    h4 = geom%dv
+    
+    !*** array position location ***
+    call locate(xstar4,x4,n4,h4,subp,ipos4)
+
+    !*** calculation of cubic spline basis ***
+    call spline1d_common_basis(x4(ipos4),xstar4,x4(ipos4+1),h4,sbase4)
+
+    !*** computation of f(i,j,k,x4*) ***
+    finterpol = 0._RKIND
+    do l = -1,2
+      finterpol = finterpol + coef1d(ipos4+l)*sbase4(l)
+    enddo
+  end subroutine interpol1d_v
+
+
+
+  !***********************************************
+  ! USED FOR INTEGRAL COMPUTATION, USING 
+  !  CUBIC SPLINE INTERPOLATION
+  !***********************************************
+  !--------------------------------------------------
+  ! Computes for all function H(x) the integral
+  !  \int(H(x))dx
+  !--------------------------------------------------
+  subroutine compute_phase_integral(Nx,dx, &
+    Hx,BC_x_left,Bc_x_right,deriv_Hx,integral_value)
+
+    use spline1d_mod, only : spline1d_common_integration_coef_BC
+    use spline1d_natural_types
+    use spline1d_natural_class, only : spline1d_natural_new, &
+        spline1d_natural_spline_coef, spline1d_natural_del
+    use spline1d_periodic_types
+    use spline1d_periodic_class, only : spline1d_periodic_new, &
+        spline1d_periodic_spline_coef, spline1d_periodic_del
+
+    integer                    , intent(in)  :: Nx
+    real(RKIND)                , intent(in)  :: dx
+    real(RKIND), dimension(0:) , intent(in)  :: Hx
+    integer           , optional, intent(in) :: BC_x_left
+    integer           , optional, intent(in) :: BC_x_right
+    real(RKIND), dimension(0:1), &
+                       optional, intent(in)  :: deriv_Hx
+    real(RKIND)                , intent(out) :: integral_value
+    
+    real(RKIND)   , dimension(:), pointer :: Hx_scoef
+    type(spline1d_natural_t)              :: xspline1d_natural
+    type(spline1d_periodic_t)             :: xspline1d_periodic
+    real(RKIND)                           :: Hx_int_tmp
+
+    integer                     :: idx
+    integer    , dimension(1:6) :: indx
+    real(RKIND), dimension(1:6) :: fact     
+
+    !*** Case Nx = 0 ****
+    if (Nx.eq.0) then
+      integral_value = Hx(0)
+      return
+    end if
+
+    !*** Case Nx != 0 ****
+    allocate(Hx_scoef(-1:Nx+1))
+    if (present(deriv_Hx)) then
+      if (.not.present(BC_x_right)) then
+        print*,"Boundary conditions specification are missing"
+        stop
+      end if
+      !*** case for natural boundary condition ***
+      call spline1d_natural_new(xspline1d_natural,Nx,dx)
+      call spline1d_natural_spline_coef(xspline1d_natural, &
+          Hx(0:Nx),BC_x_left,BC_x_right,deriv_Hx(0:1))
+      Hx_scoef(-1:Nx+1) = xspline1d_natural%scoef(-1:Nx+1)
+    else
+      !*** case for periodic boundary condition ***
+      call spline1d_periodic_new(xspline1d_periodic,Nx,dx)
+      call spline1d_periodic_spline_coef(xspline1d_periodic,Hx(0:Nx))
+      Hx_scoef(-1:Nx+1) = xspline1d_periodic%scoef(-1:Nx+1)
+    end if
+
+
+    !*** \int(H(x))dx computation ***
+    call spline1d_common_integration_coef_BC(Nx,dx,indx,fact)
+    Hx_int_tmp = sum(Hx_scoef(2:Nx-2))
+    Hx_int_tmp = 6._RKIND*dx*Hx_int_tmp
+    do idx = 1,6
+      Hx_int_tmp = Hx_int_tmp + fact(idx)*Hx_scoef(indx(idx))
+    end do
+    integral_value = Hx_int_tmp
+
+    !*** variable deallocation ***
+    deallocate(Hx_scoef)
+    if (present(deriv_Hx)) then
+      call spline1d_natural_del(xspline1d_natural)
+    else
+      call spline1d_periodic_del(xspline1d_periodic) 
+    end if
+  end subroutine compute_phase_integral
+
+
+  !--------------------------------------------------
+  ! Computes for all function H(x,v) the integral
+  !  I = \int(H(x,v)dxdv
+  !--------------------------------------------------
+  subroutine compute_intdxdv(geom,H,H_intdxdv)
+    use globals, only : Nx, Nv
+    type(geometry)                   , intent(in)  :: geom
+    real(RKIND), dimension(0:Nx,0:Nv) & 
+                                     , intent(in)  :: H
+    real(RKIND)                      , intent(out) :: H_intdxdv
+
+    real(RKIND) :: H_tmp
+    integer     :: ix, iv
+
+    H_intdxdv = 0._RKIND
+    do iv = 0,Nv
+      do ix = 0,Nx
+        H_tmp     = H(ix,iv)
+        H_intdxdv = H_intdxdv + &
+          H_tmp*geom%coeff_intdx(ix)*geom%coeff_intdv(iv)
+      end do
+    end do
+  end subroutine compute_intdxdv
+
+
+  !--------------------------------------------------
+  ! Computes for all function H(x,v) the integral
+  !  I(x) = \int(H(x,v)dv
+  !--------------------------------------------------
+  subroutine compute_intdv(geom,H,H_intdv)
+    use globals, only : Nx, Nv
+    type(geometry)                   , intent(in)  :: geom
+    real(RKIND), dimension(0:Nx,0:Nv) & 
+                                     , intent(in)  :: H
+    real(RKIND), dimension(0:Nx)     , intent(out) :: H_intdv
+
+    real(RKIND) :: H_tmp
+    integer     :: ix, iv
+
+    do ix = 0,Nx
+      H_intdv(ix) = 0._RKIND
+      do iv = 0,Nv
+        H_tmp       = H(ix,iv)
+        H_intdv(ix) = H_intdv(ix) + H_tmp*geom%coeff_intdv(iv)
+      end do
+    end do
+  end subroutine compute_intdv
+
+end module interpolation_module
+
+
+

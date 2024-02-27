@@ -1,0 +1,140 @@
+%-----------------------------------------------------
+%  file : plot_BumpOnTail.m
+%  date : 2015-02-15
+%-----------------------------------------------------
+
+%-----------------------------------------------------
+% Analytic expressions of omega for kx0
+kx02 = kx0^2;
+omega_th0 = sqrt(1+sqrt(1+12*kx02))/sqrt(2);
+vphi_th0  = omega_th0/kx0;
+
+disp('=========================')
+disp(['    kx0       = ',num2str(kx0)])
+disp(['    omega_th0 = ',num2str(omega_th0)])
+disp(['    vphi_th0  = ',num2str(vphi_th0)])
+disp('=========================')
+
+%-----------------------------------------------------
+%*** plot the potential energy and the Fourier spectrum of phi ***
+figure()
+for it=1:Ntime
+  [FTPhi(it,:),kx] = Fourier1D(Phi1D_evol(:,it)',xg);
+  plot(kx,log10(abs(FTPhi(it,:))),'-r.');grid
+  axis([kx(1) kx(end) -10 0])
+  xlabel('kx'); ylabel('abs(FT[phi])')
+  title(['it = ',num2str(it),' / ',num2str(Ntime)])
+  pause(0.1)
+end
+% wave number having the largest magnitude at t_end 
+ikx_max = max(find(abs(FTPhi(end,:))==max(abs(FTPhi(end,:)))));
+kx_max  = kx(ikx_max);
+%
+figure()
+pcolor(kx,time,log10(abs(FTPhi)));shading('flat');colorbar
+xlabel('wave vector kx'); ylabel('time');
+title('Log10 |F[phi]|')
+caxis([-10 0])
+%-----------------------------------------------------
+%*** plot energy conservation ***
+Entot      = Enkin+Enpot;
+Entot_init = (Enkin(1)+Enpot(1))/2.;
+figure();
+plot(time,Enkin,'r+-',time,Enpot,'b-o');grid
+hold on;
+plot(time,Entot-Entot_init,'g+-');
+hold off;
+legend('Enkin','Enpot','Entot');
+
+%-----------------------------------------------------
+%*** plot entropy conservation ***
+figure();
+semilogy(time,(entropy-entropy(1))./entropy,'r+-'); grid;
+xlabel('time'); ylabel('delta Entropy / Entropy')
+
+%-----------------------------------------------------
+% real frequency - comparison to theoretical value
+[FTPhi_t,omega] = Fourier1D(Phi1D_evol(1,:),time);
+figure()
+subplot(211)
+  plot(time,Phi1D_evol(1,:),'-r.');grid
+  xlabel('time'); ylabel('phi(t,x=0)')
+subplot(212)
+  semilogy(omega,abs(FTPhi_t),'-r.');grid
+  xlabel('frequency'); ylabel('|FT[phi(t,x=0)]|')
+% index at which the spectrum is maximum
+iomega_max = max(find(abs(FTPhi_t)==max(abs(FTPhi_t))));
+omega_max = omega(max(iomega_max));
+disp('=========================')
+disp(['    omega_max = ',num2str(omega_max)])
+disp('=========================')
+
+%-----------------------------------------------------
+% equilibrium distribution function
+figure()
+% phase velocity
+vphi_max = omega_max/kx_max;
+for it=1:Ntime
+  plot(vg,f1Dv_evol(:,it),'-r.');grid
+  hold on;
+  plot([1 1]*vphi_max,[0 1],'k')
+  hold off
+  xlabel('velocity v'); ylabel('Distribution Function')
+  title(['it = ',num2str(it),' / ',num2str(Ntime)])
+  axis([vg(1) vg(end) 0 1])
+  pause(0.1)
+end
+
+%-----------------------------------------------------
+% resonance broadening: width of island
+
+% Width of the island (separatrix)
+delta_v = 4*sqrt(abs(FTPhi(:,ikx_max)));
+
+figure;
+dfv_evol = f1Dv_evol-f1Dv_evol(:,1)*ones(1,Ntime);
+pcolor(vg,time,dfv_evol');shading('flat');colorbar
+hold on;
+plot(time*0,time,'k')
+plot(vphi_max*ones(1,Ntime),time,'w');
+plot(vphi_max+delta_v/2,time,'w--',vphi_max-delta_v/2,time,'w--');
+hold off
+xlabel('velocity');ylabel('time');title('f(x_0,v,t)-f(x_0,v,0)')
+
+%-----------------------------------------------------
+% Small scales in velocity space
+
+figure
+for it=1:Ntime
+  [FTdfv(it,:),kv] = Fourier1D(dfv_evol(:,it)',vg);
+  semilogy(kv,abs(FTdfv(it,:)),'-r.');grid;axis([kv(1) kv(end) 1e-10 1e-2])
+  xlabel('k_v');ylabel('|TF \deltaf|');
+  title(['it = ',num2str(it),' / ',num2str(Ntime)])
+  pause(0.05)
+end
+dkv = kv(2)-kv(1);
+
+figure
+pcolor(kv-dkv/2,time,(abs(FTdfv)));shading('flat');colorbar
+xlabel('k_v');ylabel('time')
+title('Fourier Transform of \deltaf in velocity space')
+
+%-----------------------------------------------------
+if (f2D_evol_true==1) 
+%-----------------------------------------------------
+% f2D plot
+fM   = exp(-vg.^2/2)/sqrt(2*pi);
+fM2D = ones(Nx,1)*fM';
+
+figure
+itdiag = 5;
+%for itdiag=1:Ntime
+  pcolor(xg,vg,(f2D_evol(:,:,itdiag)-f2D_evol(:,:,1))'); shading('flat'); colorbar();
+  hold on;plot([xg(1) xg(end)],vphi_th0*[1 1],'w');hold off
+  xlabel('x coordinate'); ylabel('velocity')
+  title(['\delta f(x,v) at time ',num2str(time(itdiag)),' / ',num2str(time(end))]) 
+%  pause(0.1)
+%end
+%-----------------------------------------------------
+end
+%-----------------------------------------------------

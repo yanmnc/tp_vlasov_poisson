@@ -1,0 +1,162 @@
+!**************************************************************
+!  Copyright Euratom-CEA
+!  Authors : 
+!     Virginie Grandgirard (virginie.grandgirard@cea.fr)
+!
+!  Code VlasovPoisson : solving of the 2D Vlasov-Poisson
+!    system for:
+!      1) Landau damping study or
+!      2) Plasma beam study
+!  
+!  This software is governed by the CeCILL-B license 
+!  under French law and abiding by the rules of distribution 
+!  of free software.  You can  use, modify and redistribute 
+!  the software under the terms of the CeCILL-B license as 
+!  circulated by CEA, CNRS and INRIA at the following URL
+!  "http://www.cecill.info". 
+!**************************************************************
+
+!-------------------------------------------------
+! file : energy.f90
+!
+!  used for energy computation
+!------------------------------------------------
+
+module energy_module
+  use prec_const
+  use globals, only : Enkin_evol, Enpot_evol
+  use fdistribu2d_class
+
+  implicit none
+  
+  public :: compute_potential_energy, &
+    compute_kinetic_energy
+
+  !******************************
+  contains
+  !******************************
+  
+  !------------------------------------------------------------
+  ! Computes the potential energy function of the 
+  !   Enpot = 0.5*\int Phi(ni-1)dx
+  !------------------------------------------------------------
+  subroutine compute_potential_energy(geom,f,Phi,idiag_num)
+
+    use globals, only : BC_v_left, BC_v_right
+    use interpolation_module, only : compute_phase_integral
+
+    type(geometry)                  , intent(in) :: geom
+    type(fdistribu2d)               , intent(in) :: f
+    real(RKIND)      , dimension(0:), intent(in) :: Phi
+    integer                         , intent(in) :: idiag_num
+
+    integer                              :: ix, ivpar
+    real(RKIND), dimension(:)  , pointer :: rhs
+    real(RKIND), dimension(0:1)          :: deriv_rhs
+    real(RKIND), dimension(:)  , pointer :: Hi
+    real(RKIND)                          :: ni_tmp, Enpot
+
+    !*** array allocation ***
+    allocate(rhs(0:f%n2))
+    allocate(Hi(0:f%n1))
+
+    !*** compute Hi(x) = Phi(ni-1) ****
+    Hi = 0._RKIND
+
+    do ix = 0,f%n1
+      rhs = 0._RKIND
+      do ivpar = 0,f%n2
+        rhs(ivpar) = f%values(ix,ivpar)
+      end do
+      deriv_rhs(0) = (11._RKIND*rhs(f%n2)/6._RKIND - &
+        3._RKIND*rhs(f%n2-1) + 1.5_RKIND*rhs(f%n2-2) - &
+        1._RKIND*rhs(f%n2-3)/3._RKIND)/f%h2
+      deriv_rhs(1) = (-11._RKIND*rhs(0)/6._RKIND + &
+        3._RKIND*rhs(1) - 1.5_RKIND*rhs(2) + &
+        1._RKIND*rhs(3)/3._RKIND)/f%h2
+      call compute_phase_integral(f%n2,f%h2,rhs(0:f%n2), &
+          BC_v_left,BC_v_right,deriv_rhs,ni_tmp)
+      Hi(ix) = Phi(ix)*(ni_tmp-1._RKIND)
+    end do
+
+    !*** compute Enkin = \int(Hi(x)dx ****
+    call compute_phase_integral(Nx=geom%Nx,dx=geom%dx, &
+      Hx=Hi(0:geom%Nx),integral_value=Enpot)
+    
+    Enpot_evol(idiag_num) = 0.5_RKIND*Enpot
+
+    !*** deallocation ***
+    deallocate(rhs)
+    deallocate(Hi)
+  end subroutine compute_potential_energy
+
+
+  !----------------------------------------------------
+  ! Computes the kinetic energy given by
+  !  Enkin = 0.5*\int((f-fM)*vpar^2)dxdvpar
+  ! So we first compute,
+  !  H(x) = \int((f-fM)*vpar^2)dvpar
+  ! and then Enkin = 0.5*\int(H(x))dx
+  !----------------------------------------------------
+  subroutine compute_kinetic_energy(geom,f,idiag_num)
+
+    use globals, only : BC_v_left, BC_v_right
+    use interpolation_module, only : compute_phase_integral
+
+    type(geometry)   , intent(in) :: geom
+    type(fdistribu2d), intent(in) :: f
+    integer          , intent(in) :: idiag_num
+    
+    integer :: ix, ivpar
+ 
+    real(RKIND), dimension(:)  , pointer :: rhs
+    real(RKIND), dimension(0:1)          :: deriv_rhs
+    real(RKIND), dimension(:)  , pointer :: Hi
+    real(RKIND)                          :: Hi_tmp, Enkin
+
+    !*** array allocation ***
+    allocate(rhs(0:f%n2))
+    allocate(Hi(0:f%n1))
+
+    !*** compute Hi(x) = \int((f-fM)*vpar^2)dvpar ****
+    Hi = 0._RKIND
+    do ix = 0,f%n1
+      rhs = 0._RKIND
+      do ivpar = 0,f%n2
+        rhs(ivpar) = (f%values(ix,ivpar) - &
+          f%Maxwellian(ivpar))*geom%vgrid(ivpar)**2
+      end do
+      deriv_rhs(0) = (11._RKIND*rhs(f%n2)/6._RKIND - &
+        3._RKIND*rhs(f%n2-1) + 1.5_RKIND*rhs(f%n2-2) - &
+        1._RKIND*rhs(f%n2-3)/3._RKIND)/f%h2
+      deriv_rhs(1) = (-11._RKIND*rhs(0)/6._RKIND + &
+        3._RKIND*rhs(1) - 1.5_RKIND*rhs(2) + &
+        1._RKIND*rhs(3)/3._RKIND)/f%h2
+      call compute_phase_integral(f%n2,f%h2,rhs(0:f%n2), &
+          BC_v_left, BC_v_right,deriv_rhs,Hi_tmp)
+      Hi(ix) = Hi_tmp
+    end do
+
+    !*** compute Enkin = \int(Hi(x)dx ****
+    call compute_phase_integral(Nx=geom%Nx,dx=geom%dx, &
+      Hx=Hi(0:geom%Nx),integral_value=Enkin)
+
+    Enkin_evol(idiag_num) = 0.5_RKIND*Enkin
+
+    !*** array deallocation ***
+    deallocate(rhs)
+    deallocate(Hi)
+  end subroutine compute_kinetic_energy
+
+end module energy_module
+
+
+
+
+
+
+
+
+
+
+
