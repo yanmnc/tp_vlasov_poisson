@@ -50,47 +50,59 @@ def read_VlasovPoiss():
         s[name] = f_pb2d[:, ind]
     
     # Read all the files 'Phi1D_<num>.dat'
-    s['Phi1D_evol'], s['Nx'], s['Ntime'], s['xg'] = read_1dfile_evol(prefix, 'Phi1D')
+    Phi1D_evol, Nx, Ntime, xg = read_1dfile_evol(prefix, 'Phi1D')
     
     # Read all the files 'dens_<num>.dat'
-    s['dens_evol'], _, _, _ = read_1dfile_evol(prefix, 'dens')
+    dens_evol, _, _, _ = read_1dfile_evol(prefix, 'dens')
     
     # Read all the files 'velo_<num>.dat'
-    s['velo_evol'], _, _, _ = read_1dfile_evol(prefix, 'velo')
+    velo_evol, _, _, _ = read_1dfile_evol(prefix, 'velo')
 
     # Read all the files 'temp_<num>.dat'
-    s['temp_evol'], _, _, _ = read_1dfile_evol(prefix, 'temp')
+    temp_evol, _, _, _ = read_1dfile_evol(prefix, 'temp')
 
     # Read all the files 'flux_<num>.dat'
-    s['flux_evol'], _, _, _ = read_1dfile_evol(prefix, 'flux')
+    flux_evol, _, _, _ = read_1dfile_evol(prefix, 'flux')
     
     # Read all the files 'f1Dx_<num>.dat'
-    s['f1Dx_evol'], _, _, _ = read_1dfile_evol(prefix, 'f1Dx')
+    f1Dx_evol, _, _, _ = read_1dfile_evol(prefix, 'f1Dx')
 
     # Read all the files 'f1Dv_<num>.dat'
-    s['f1Dv_evol'], s['Nv'], _, s['vg'] = read_1dfile_evol(prefix, 'f1Dv')
+    f1Dv_evol, Nv, _, vg = read_1dfile_evol(prefix, 'f1Dv')
     
     # Read all the files 'f2D_<num>.dat'
-    # Read all the 2D files 'f2D_<num>.dat'
     f2D_acronym = prefix + 'f2D'
     f2D_filelist, f2D_nbfiles = create_file_list(f2D_acronym, '.dat', 0)
 
     if f2D_nbfiles > 1:
-        Nx = s['Nx']
-        Nv = s['Nv']
         print(f'--> Reading of the f2D_<num>.dat files')
-        f2D_evol = []
+        f2D_evol = np.empty((Nv, Nx, Ntime))
         for i in range(f2D_nbfiles):
             f2D_tmp = np.loadtxt(f2D_filelist[i])
-            f2D_evol.append(np.reshape(f2D_tmp[:, 2], (Nx, Nv)))
+            f2D_evol[:, :, i] = np.reshape(f2D_tmp[:, 2], (Nv, Nx))
         
-        s['f2D_evol'] = np.array(f2D_evol)
-        s['f2D_evol_true'] = 1
+        f2D_evol = np.array(f2D_evol)
+        f2D_evol_true = True
     else:
-        s['f2D_evol_true'] = 0
+        f2D_evol_true = False
 
-    # Return the structure
-    print(s.keys())
+
+    s['Phi1D_evol'] = Phi1D_evol
+    s['Nx'] = Nx
+    s['Ntime'] = Ntime
+    s['xg'] = xg
+    s['vg'] = vg
+    s['dens_evol'] = dens_evol
+    s['velo_evol'] = velo_evol
+    s['temp_evol'] = temp_evol
+    s['flux_evol'] = flux_evol
+    s['f1Dx_evol'] = f1Dx_evol
+    s['f1Dv_evol'] = f1Dv_evol
+    s['Nv'] = Nv
+    s['f2D_evol'] = f2D_evol
+    s['f2D_evol_true'] = f2D_evol_true
+
+    
     return s
 
 if __name__ == "__main__":
